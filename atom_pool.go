@@ -21,23 +21,7 @@ type AtomPool struct {
 func NewAtomPool(minSize, maxSize, factor, pageSize int) *AtomPool {
 	pool := &AtomPool{make([]class, 0, 10), minSize, maxSize}
 	for chunkSize := minSize; chunkSize <= maxSize && chunkSize <= pageSize; chunkSize *= factor {
-		c := class{
-			size:   chunkSize,
-			page:   make([]byte, pageSize),
-			chunks: make([]chunk, pageSize/chunkSize),
-			head:   (1 << 32),
-		}
-		for i := 0; i < len(c.chunks); i++ {
-			chk := &c.chunks[i]
-			// lock down the capacity to protect append operation
-			chk.mem = c.page[i*chunkSize : (i+1)*chunkSize : (i+1)*chunkSize]
-			if i < len(c.chunks)-1 {
-				chk.next = uint64(i+1+1 /* index start from 1 */) << 32
-			} else {
-				c.pageBegin = uintptr(unsafe.Pointer(&c.page[0]))
-				c.pageEnd = uintptr(unsafe.Pointer(&chk.mem[0]))
-			}
-		}
+		c := newclass(size, pageSize, chunkSize)
 		pool.classes = append(pool.classes, c)
 	}
 	return pool
@@ -83,6 +67,27 @@ type chunk struct {
 	mem  []byte
 	aba  uint32 // reslove ABA problem
 	next uint64
+}
+
+func newclass(size, pageSize, chunkSize int) class {
+	c := class{
+		size:   chunkSize,
+		page:   make([]byte, pageSize),
+		chunks: make([]chunk, pageSize/chunkSize),
+		head:   (1 << 32),
+	}
+	for i := 0; i < len(c.chunks); i++ {
+		chk := &c.chunks[i]
+		// lock down the capacity to protect append operation
+		chk.mem = c.page[i*chunkSize : (i+1)*chunkSize : (i+1)*chunkSize]
+		if i < len(c.chunks)-1 {
+			chk.next = uint64(i+1+1 /* index start from 1 */) << 32
+		} else {
+			c.pageBegin = uintptr(unsafe.Pointer(&c.page[0]))
+			c.pageEnd = uintptr(unsafe.Pointer(&chk.mem[0]))
+		}
+	}
+	return c
 }
 
 func (c *class) Push(mem []byte) {
